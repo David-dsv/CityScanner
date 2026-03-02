@@ -12,11 +12,15 @@
   "dependencies": {
     "@turf/turf": "^7.3.4",
     "autoprefixer": "^10.4.27",
+    "leaflet": "^1.9.4",
+    "leaflet.heat": "^0.2.0",
     "lucide-react": "^0.576.0",
     "mapbox-gl": "^3.19.0",
+    "maplibre-gl": "^5.19.0",
     "postcss": "^8.5.6",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
+    "react-leaflet": "^5.0.0",
     "tailwindcss": "^4.2.1"
   },
   "devDependencies": {

@@ -1,354 +1,304 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
-import mapboxgl from 'mapbox-gl';
-import * as turf from '@turf/turf';
+import { useEffect, useRef, useState } from 'react';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
+import 'leaflet.heat';
 import {
   PARIS_15_CENTER,
   METRO_LINE_6_ROUTE,
   METRO_LINE_6_STATIONS,
-  BUS_ROUTES,
-  TAXI_ZONES,
+  fetchAllBusRoutes,
+  fetchTaxiRoutes,
   generatePollutionGrid,
-  generateHeatGrid,
-  ROAD_QUALITY
+  generateHeatGrid
 } from '../data/paris15';
-
-mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN;
 
 export default function Map({ layers, onDataUpdate }) {
   const mapContainer = useRef(null);
   const map = useRef(null);
   const animationRef = useRef(null);
-  const vehiclesRef = useRef({ metro: [], buses: [], taxis: [] });
+  const layersRef = useRef({});
+  const vehicleMarkersRef = useRef([]);
+  const routesRef = useRef({ buses: [], taxis: [] });
+  const vehiclesRef = useRef(null);
   const [mapLoaded, setMapLoaded] = useState(false);
-  const [error, setError] = useState(null);
-
-  const addDataSources = useCallback(() => {
-    if (!map.current) return;
-
-    map.current.addSource('pollution', {
-      type: 'geojson',
-      data: generatePollutionGrid()
-    });
-
-    map.current.addSource('heat-islands', {
-      type: 'geojson',
-      data: generateHeatGrid()
-    });
-
-    map.current.addSource('metro-line-6', {
-      type: 'geojson',
-      data: METRO_LINE_6_ROUTE
-    });
-
-    map.current.addSource('metro-stations', {
-      type: 'geojson',
-      data: {
-        type: 'FeatureCollection',
-        features: METRO_LINE_6_STATIONS.map(station => ({
-          type: 'Feature',
-          properties: { name: station.name },
-          geometry: { type: 'Point', coordinates: [station.lng, station.lat] }
-        }))
-      }
-    });
-
-    BUS_ROUTES.forEach(route => {
-      map.current.addSource(`bus-route-${route.id}`, {
-        type: 'geojson',
-        data: {
-          type: 'Feature',
-          properties: { name: route.name },
-          geometry: { type: 'LineString', coordinates: route.route }
-        }
-      });
-    });
-
-    map.current.addSource('road-quality', {
-      type: 'geojson',
-      data: {
-        type: 'FeatureCollection',
-        features: ROAD_QUALITY.map(road => ({
-          type: 'Feature',
-          properties: { quality: road.quality, name: road.name },
-          geometry: { type: 'LineString', coordinates: [road.start, road.end] }
-        }))
-      }
-    });
-
-    map.current.addSource('vehicles', {
-      type: 'geojson',
-      data: { type: 'FeatureCollection', features: [] }
-    });
-  }, []);
-
-  const addDataLayers = useCallback(() => {
-    if (!map.current) return;
-
-    // Pollution heatmap
-    map.current.addLayer({
-      id: 'pollution-heat',
-      type: 'heatmap',
-      source: 'pollution',
-      paint: {
-        'heatmap-weight': ['get', 'intensity'],
-        'heatmap-intensity': 0.8,
-        'heatmap-color': [
-          'interpolate', ['linear'], ['heatmap-density'],
-          0, 'rgba(34, 197, 94, 0)',
-          0.2, 'rgba(34, 197, 94, 0.3)',
-          0.4, 'rgba(234, 179, 8, 0.5)',
-          0.6, 'rgba(249, 115, 22, 0.7)',
-          0.8, 'rgba(239, 68, 68, 0.85)',
-          1, 'rgba(220, 38, 38, 1)'
-        ],
-        'heatmap-radius': 30,
-        'heatmap-opacity': 0.7
-      }
-    });
-
-    // Heat islands
-    map.current.addLayer({
-      id: 'heat-islands-layer',
-      type: 'heatmap',
-      source: 'heat-islands',
-      layout: { visibility: 'none' },
-      paint: {
-        'heatmap-weight': ['get', 'intensity'],
-        'heatmap-intensity': 1,
-        'heatmap-color': [
-          'interpolate', ['linear'], ['heatmap-density'],
-          0, 'rgba(255, 255, 0, 0)',
-          0.3, 'rgba(255, 200, 0, 0.4)',
-          0.5, 'rgba(255, 150, 0, 0.6)',
-          0.7, 'rgba(255, 100, 0, 0.8)',
-          1, 'rgba(255, 50, 0, 1)'
-        ],
-        'heatmap-radius': 35,
-        'heatmap-opacity': 0.6
-      }
-    });
-
-    // Metro line
-    map.current.addLayer({
-      id: 'metro-line-6-layer',
-      type: 'line',
-      source: 'metro-line-6',
-      paint: { 'line-color': '#22c55e', 'line-width': 4, 'line-opacity': 0.8 }
-    });
-
-    // Metro stations
-    map.current.addLayer({
-      id: 'metro-stations-layer',
-      type: 'circle',
-      source: 'metro-stations',
-      paint: {
-        'circle-radius': 8,
-        'circle-color': '#22c55e',
-        'circle-stroke-width': 2,
-        'circle-stroke-color': '#ffffff'
-      }
-    });
-
-    // Bus routes
-    BUS_ROUTES.forEach(route => {
-      map.current.addLayer({
-        id: `bus-route-${route.id}-layer`,
-        type: 'line',
-        source: `bus-route-${route.id}`,
-        paint: {
-          'line-color': route.color,
-          'line-width': 3,
-          'line-opacity': 0.7,
-          'line-dasharray': [2, 1]
-        }
-      });
-    });
-
-    // Road quality
-    map.current.addLayer({
-      id: 'road-quality-layer',
-      type: 'line',
-      source: 'road-quality',
-      layout: { visibility: 'none' },
-      paint: {
-        'line-color': [
-          'interpolate', ['linear'], ['get', 'quality'],
-          0, '#ef4444', 0.5, '#f59e0b', 1, '#22c55e'
-        ],
-        'line-width': 6,
-        'line-opacity': 0.8
-      }
-    });
-
-    // Vehicles
-    map.current.addLayer({
-      id: 'vehicles-layer',
-      type: 'circle',
-      source: 'vehicles',
-      paint: {
-        'circle-radius': ['match', ['get', 'type'], 'metro', 10, 'bus', 8, 'taxi', 6, 6],
-        'circle-color': ['match', ['get', 'type'], 'metro', '#22c55e', 'bus', '#f97316', 'taxi', '#eab308', '#ffffff'],
-        'circle-stroke-width': 2,
-        'circle-stroke-color': '#ffffff',
-        'circle-opacity': 0.9
-      }
-    });
-
-    // Station labels
-    map.current.addLayer({
-      id: 'metro-stations-labels',
-      type: 'symbol',
-      source: 'metro-stations',
-      layout: { 'text-field': ['get', 'name'], 'text-size': 11, 'text-offset': [0, 1.5], 'text-anchor': 'top' },
-      paint: { 'text-color': '#ffffff', 'text-halo-color': '#000', 'text-halo-width': 1 }
-    });
-  }, []);
+  const [routesLoaded, setRoutesLoaded] = useState(false);
 
   // Initialize map
   useEffect(() => {
     if (map.current) return;
 
-    if (!mapboxgl.accessToken) {
-      setError('Token Mapbox manquant');
-      return;
-    }
-
-    console.log('Initializing map with token:', mapboxgl.accessToken.slice(0, 20) + '...');
-
-    map.current = new mapboxgl.Map({
-      container: mapContainer.current,
-      style: 'mapbox://styles/mapbox/dark-v11',
-      center: [PARIS_15_CENTER.lng, PARIS_15_CENTER.lat],
-      zoom: 13,
-      pitch: 0,
-      bearing: 0,
-      antialias: false,
-      preserveDrawingBuffer: true,
-      failIfMajorPerformanceCaveat: false
+    map.current = L.map(mapContainer.current, {
+      center: [PARIS_15_CENTER.lat, PARIS_15_CENTER.lng],
+      zoom: 14,
+      zoomControl: false,
+      attributionControl: false
     });
 
-    map.current.on('error', (e) => {
-      console.error('Mapbox error:', e);
-      setError('Erreur Mapbox: ' + (e.error?.message || e.message || 'Erreur inconnue'));
+    // Dark basemap
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      maxZoom: 19,
+      subdomains: 'abcd'
+    }).addTo(map.current);
+
+    // Metro Line 6 - glow effect
+    L.polyline(METRO_LINE_6_ROUTE.geometry.coordinates.map(c => [c[1], c[0]]),
+      { color: '#22c55e', weight: 10, opacity: 0.15 }).addTo(map.current);
+    L.polyline(METRO_LINE_6_ROUTE.geometry.coordinates.map(c => [c[1], c[0]]),
+      { color: '#22c55e', weight: 5, opacity: 0.9 }).addTo(map.current);
+
+    // Metro stations
+    METRO_LINE_6_STATIONS.forEach(station => {
+      L.circleMarker([station.lat, station.lng], {
+        radius: 10, fillColor: '#22c55e', color: 'transparent', fillOpacity: 0.25
+      }).addTo(map.current);
+      L.circleMarker([station.lat, station.lng], {
+        radius: 6, fillColor: '#22c55e', color: '#fff', weight: 2, fillOpacity: 1
+      }).bindTooltip(station.name, { permanent: false, direction: 'top', className: 'station-tooltip' })
+        .addTo(map.current);
     });
 
-    // Handle WebGL context loss
-    const canvas = map.current.getCanvas();
-    canvas.addEventListener('webglcontextlost', (e) => {
-      console.warn('WebGL context lost, preventing default...');
-      e.preventDefault();
+    // Pollution heatmap - smooth and unified
+    const pollutionData = generatePollutionGrid();
+    const heatData = pollutionData.features.map(f => [
+      f.geometry.coordinates[1], f.geometry.coordinates[0], f.properties.intensity
+    ]);
+    const pollutionHeatLayer = L.heatLayer(heatData, {
+      radius: 40,
+      blur: 35,
+      maxZoom: 18,
+      max: 0.6,
+      minOpacity: 0.15,
+      gradient: {
+        0.0: 'rgba(34, 197, 94, 0)',
+        0.15: 'rgba(34, 197, 94, 0.25)',
+        0.3: 'rgba(132, 204, 22, 0.4)',
+        0.45: 'rgba(234, 179, 8, 0.55)',
+        0.6: 'rgba(249, 115, 22, 0.65)',
+        0.75: 'rgba(239, 68, 68, 0.75)',
+        0.9: 'rgba(185, 28, 28, 0.85)',
+        1.0: 'rgba(153, 27, 27, 0.95)'
+      }
     });
-    canvas.addEventListener('webglcontextrestored', () => {
-      console.log('WebGL context restored');
+    pollutionHeatLayer.addTo(map.current);
+    layersRef.current.pollution = pollutionHeatLayer;
+
+    // Heat islands - smooth
+    const heatGridData = generateHeatGrid();
+    const heatIslandData = heatGridData.features.map(f => [
+      f.geometry.coordinates[1], f.geometry.coordinates[0], f.properties.intensity
+    ]);
+    layersRef.current.heat = L.heatLayer(heatIslandData, {
+      radius: 50,
+      blur: 40,
+      maxZoom: 18,
+      max: 0.6,
+      minOpacity: 0.1,
+      gradient: {
+        0.0: 'rgba(255, 200, 0, 0)',
+        0.2: 'rgba(255, 180, 0, 0.3)',
+        0.4: 'rgba(255, 140, 0, 0.45)',
+        0.6: 'rgba(255, 100, 0, 0.6)',
+        0.8: 'rgba(255, 60, 0, 0.75)',
+        1.0: 'rgba(220, 38, 38, 0.9)'
+      }
     });
 
-    map.current.on('load', () => {
-      console.log('Map loaded successfully');
+    // Empty road quality layer
+    layersRef.current.roads = L.layerGroup();
 
-      // 3D buildings - simplified for performance
-      const styleLayers = map.current.getStyle().layers;
-      const labelLayerId = styleLayers.find(l => l.type === 'symbol' && l.layout['text-field'])?.id;
-
-      map.current.addLayer({
-        id: '3d-buildings',
-        source: 'composite',
-        'source-layer': 'building',
-        filter: ['==', 'extrude', 'true'],
-        type: 'fill-extrusion',
-        minzoom: 14,
-        paint: {
-          'fill-extrusion-color': '#1a1a2e',
-          'fill-extrusion-height': ['interpolate', ['linear'], ['zoom'], 14, 0, 15, ['get', 'height']],
-          'fill-extrusion-base': ['get', 'min_height'],
-          'fill-extrusion-opacity': 0.6
-        }
-      }, labelLayerId);
-
-      addDataSources();
-      addDataLayers();
-      setMapLoaded(true);
-    });
+    setMapLoaded(true);
 
     return () => {
       if (animationRef.current) cancelAnimationFrame(animationRef.current);
       map.current?.remove();
+      map.current = null;
     };
-  }, [addDataSources, addDataLayers]);
+  }, []);
 
-  // Animation
+  // Fetch real routes from OSRM
   useEffect(() => {
     if (!mapLoaded) return;
 
-    const speed = 0.002;
+    const loadRoutes = async () => {
+      console.log('Fetching real routes from OSRM...');
 
-    vehiclesRef.current.metro = [
-      { progress: 0, direction: 1 },
-      { progress: 0.5, direction: -1 }
-    ];
+      try {
+        const [busRoutes, taxiRoutes] = await Promise.all([
+          fetchAllBusRoutes(),
+          fetchTaxiRoutes()
+        ]);
 
-    vehiclesRef.current.buses = BUS_ROUTES.map(() => ({
-      progress: Math.random(),
-      direction: Math.random() > 0.5 ? 1 : -1
-    }));
+        routesRef.current.buses = busRoutes;
+        routesRef.current.taxis = taxiRoutes;
 
-    vehiclesRef.current.taxis = TAXI_ZONES.flatMap(zone =>
-      Array(2).fill(null).map(() => ({
-        lng: zone.lng + (Math.random() - 0.5) * zone.radius * 2,
-        lat: zone.lat + (Math.random() - 0.5) * zone.radius * 2,
-        targetLng: zone.lng + (Math.random() - 0.5) * zone.radius * 2,
-        targetLat: zone.lat + (Math.random() - 0.5) * zone.radius * 2,
-        zone
-      }))
-    );
+        console.log(`Loaded ${busRoutes.length} bus routes, ${taxiRoutes.length} taxi routes`);
+
+        // Initialize vehicles with real routes
+        const metros = Array(4).fill(null).map((_, i) => ({
+          progress: i / 4,
+          direction: i % 2 === 0 ? 1 : -1,
+          speed: 0.00015 + Math.random() * 0.00003
+        }));
+
+        const buses = busRoutes.flatMap((route, routeIdx) => {
+          return Array(2).fill(null).map((_, i) => ({
+            routeIdx,
+            progress: (i + Math.random() * 0.3) / 2,
+            direction: i % 2 === 0 ? 1 : -1,
+            speed: 0.0001 + Math.random() * 0.00005,
+            stopTime: 0,
+            color: route.color
+          }));
+        });
+
+        const taxis = taxiRoutes.flatMap((route, routeIdx) => {
+          const count = 3 + Math.floor(Math.random() * 2);
+          return Array(count).fill(null).map(() => ({
+            routeIdx,
+            progress: Math.random(),
+            direction: Math.random() > 0.5 ? 1 : -1,
+            speed: 0.0002 + Math.random() * 0.0003,
+            state: 'moving',
+            stateTimer: 0
+          }));
+        });
+
+        vehiclesRef.current = { metros, buses, taxis };
+        setRoutesLoaded(true);
+
+      } catch (e) {
+        console.error('Failed to load routes:', e);
+      }
+    };
+
+    loadRoutes();
+  }, [mapLoaded]);
+
+  // Animation loop
+  useEffect(() => {
+    if (!routesLoaded || !map.current || !vehiclesRef.current) return;
+
+    const { metros, buses, taxis } = vehiclesRef.current;
+    const { buses: busRoutes, taxis: taxiRoutes } = routesRef.current;
+
+    const getPositionOnRoute = (coords, progress) => {
+      if (!coords || coords.length < 2) return [PARIS_15_CENTER.lng, PARIS_15_CENTER.lat];
+
+      const clampedProgress = Math.max(0, Math.min(1, progress));
+      const totalSegs = coords.length - 1;
+      const exactPos = clampedProgress * totalSegs;
+      const segIdx = Math.min(Math.floor(exactPos), totalSegs - 1);
+      const t = exactPos - segIdx;
+
+      const lng = coords[segIdx][0] + (coords[segIdx + 1][0] - coords[segIdx][0]) * t;
+      const lat = coords[segIdx][1] + (coords[segIdx + 1][1] - coords[segIdx][1]) * t;
+
+      return [lng, lat];
+    };
 
     const animate = () => {
-      const features = [];
+      vehicleMarkersRef.current.forEach(m => m.remove());
+      vehicleMarkersRef.current = [];
 
-      // Metro
-      vehiclesRef.current.metro.forEach(m => {
-        m.progress += speed * m.direction;
-        if (m.progress >= 1 || m.progress <= 0) m.direction *= -1;
-        const route = turf.lineString(METRO_LINE_6_ROUTE.geometry.coordinates);
-        const point = turf.along(route, Math.abs(m.progress) * turf.length(route));
-        features.push({ type: 'Feature', properties: { type: 'metro' }, geometry: point.geometry });
+      // Metros
+      metros.forEach(m => {
+        m.progress += m.speed * m.direction;
+        if (m.progress >= 1) { m.progress = 1; m.direction = -1; }
+        if (m.progress <= 0) { m.progress = 0; m.direction = 1; }
+
+        const coords = METRO_LINE_6_ROUTE.geometry.coordinates;
+        const [lng, lat] = getPositionOnRoute(coords, m.progress);
+
+        vehicleMarkersRef.current.push(
+          L.circleMarker([lat, lng], { radius: 14, fillColor: '#22c55e', color: 'transparent', fillOpacity: 0.35 }).addTo(map.current),
+          L.circleMarker([lat, lng], { radius: 9, fillColor: '#22c55e', color: '#fff', weight: 2, fillOpacity: 1 }).addTo(map.current)
+        );
       });
 
-      // Buses
-      vehiclesRef.current.buses.forEach((b, i) => {
-        b.progress += speed * 0.8 * b.direction;
-        if (b.progress >= 1 || b.progress <= 0) b.direction *= -1;
-        const route = turf.lineString(BUS_ROUTES[i].route);
-        const point = turf.along(route, Math.abs(b.progress) * turf.length(route));
-        features.push({ type: 'Feature', properties: { type: 'bus' }, geometry: point.geometry });
-      });
+      // Buses (on real OSRM routes)
+      buses.forEach(b => {
+        const route = busRoutes[b.routeIdx];
+        if (!route || !route.route) return;
 
-      // Taxis
-      vehiclesRef.current.taxis.forEach(t => {
-        const dx = t.targetLng - t.lng;
-        const dy = t.targetLat - t.lat;
-        if (Math.sqrt(dx*dx + dy*dy) < 0.0002) {
-          t.targetLng = t.zone.lng + (Math.random() - 0.5) * t.zone.radius * 2;
-          t.targetLat = t.zone.lat + (Math.random() - 0.5) * t.zone.radius * 2;
+        if (b.stopTime > 0) {
+          b.stopTime--;
         } else {
-          t.lng += dx * 0.02;
-          t.lat += dy * 0.02;
+          b.progress += b.speed * b.direction;
+
+          if (b.progress >= 1 || b.progress <= 0) {
+            b.direction *= -1;
+            b.progress = Math.max(0, Math.min(1, b.progress));
+            if (Math.random() > 0.3) b.stopTime = 150 + Math.floor(Math.random() * 200);
+          }
+
+          if (Math.random() < 0.0005) {
+            b.stopTime = 80 + Math.floor(Math.random() * 100);
+          }
         }
-        features.push({ type: 'Feature', properties: { type: 'taxi' }, geometry: { type: 'Point', coordinates: [t.lng, t.lat] } });
+
+        const [lng, lat] = getPositionOnRoute(route.route, b.progress);
+
+        vehicleMarkersRef.current.push(
+          L.circleMarker([lat, lng], { radius: 11, fillColor: '#f97316', color: 'transparent', fillOpacity: 0.35 }).addTo(map.current),
+          L.circleMarker([lat, lng], { radius: 7, fillColor: '#f97316', color: '#fff', weight: 2, fillOpacity: 1 }).addTo(map.current)
+        );
       });
 
-      if (map.current?.getSource('vehicles')) {
-        map.current.getSource('vehicles').setData({ type: 'FeatureCollection', features });
-      }
+      // Taxis (on real OSRM routes)
+      taxis.forEach(t => {
+        const route = taxiRoutes[t.routeIdx];
+        if (!route) return;
+
+        if (t.state === 'stopped') {
+          t.stateTimer--;
+          if (t.stateTimer <= 0) {
+            t.state = 'moving';
+            if (Math.random() > 0.5) t.direction *= -1;
+          }
+        } else if (t.state === 'waiting') {
+          t.stateTimer--;
+          if (t.stateTimer <= 0) t.state = 'moving';
+        } else {
+          t.progress += t.speed * t.direction;
+
+          if (t.progress >= 1 || t.progress <= 0) {
+            // Switch to different route
+            t.routeIdx = Math.floor(Math.random() * taxiRoutes.length);
+            t.progress = t.progress >= 1 ? 0 : 1;
+            t.direction = Math.random() > 0.5 ? 1 : -1;
+
+            if (Math.random() > 0.5) {
+              t.state = 'stopped';
+              t.stateTimer = 100 + Math.floor(Math.random() * 200);
+            }
+          }
+
+          if (Math.random() < 0.0008) {
+            t.state = 'waiting';
+            t.stateTimer = 40 + Math.floor(Math.random() * 80);
+          }
+        }
+
+        const currentRoute = taxiRoutes[t.routeIdx];
+        if (!currentRoute) return;
+
+        const [lng, lat] = getPositionOnRoute(currentRoute, Math.max(0, Math.min(1, t.progress)));
+
+        vehicleMarkersRef.current.push(
+          L.circleMarker([lat, lng], { radius: 9, fillColor: '#eab308', color: 'transparent', fillOpacity: 0.4 }).addTo(map.current),
+          L.circleMarker([lat, lng], { radius: 5, fillColor: '#eab308', color: '#fff', weight: 1.5, fillOpacity: 1 }).addTo(map.current)
+        );
+      });
 
       if (onDataUpdate) {
         onDataUpdate({
-          vehicleCount: features.length,
-          metroCount: vehiclesRef.current.metro.length,
-          busCount: vehiclesRef.current.buses.length,
-          taxiCount: vehiclesRef.current.taxis.length,
+          vehicleCount: metros.length + buses.length + taxis.length,
+          metroCount: metros.length,
+          busCount: buses.length,
+          taxiCount: taxis.length,
           avgPm25: 28,
           avgNo2: 35,
-          dataPoints: 150
+          dataPoints: 180
         });
       }
 
@@ -357,32 +307,21 @@ export default function Map({ layers, onDataUpdate }) {
 
     animate();
     return () => { if (animationRef.current) cancelAnimationFrame(animationRef.current); };
-  }, [mapLoaded, onDataUpdate]);
+  }, [routesLoaded, onDataUpdate]);
 
   // Toggle layers
   useEffect(() => {
     if (!mapLoaded || !map.current) return;
 
-    ['pollution-heat', 'heat-islands-layer', 'road-quality-layer'].forEach(id => {
-      if (map.current.getLayer(id)) {
-        const visible = (id === 'pollution-heat' && layers.pollution) ||
-                       (id === 'heat-islands-layer' && layers.heat) ||
-                       (id === 'road-quality-layer' && layers.roads);
-        map.current.setLayoutProperty(id, 'visibility', visible ? 'visible' : 'none');
-      }
+    ['pollution', 'roads', 'heat'].forEach(key => {
+      const layer = layersRef.current[key];
+      if (!layer) return;
+      const shouldShow = layers[key];
+      const hasLayer = map.current.hasLayer(layer);
+      if (shouldShow && !hasLayer) map.current.addLayer(layer);
+      if (!shouldShow && hasLayer) map.current.removeLayer(layer);
     });
   }, [layers, mapLoaded]);
-
-  if (error) {
-    return (
-      <div className="map-container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', color: '#ef4444' }}>
-        <p>{error}</p>
-        <p style={{ color: '#666', fontSize: '12px', marginTop: '10px' }}>
-          Token: {mapboxgl.accessToken ? mapboxgl.accessToken.slice(0, 25) + '...' : 'NON DÉFINI'}
-        </p>
-      </div>
-    );
-  }
 
   return <div ref={mapContainer} className="map-container" />;
 }
