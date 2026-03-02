@@ -57,39 +57,39 @@ export default function Map({ layers, onDataUpdate }) {
         .addTo(map.current);
     });
 
-    // Pollution heatmap - smooth and unified
+    // Pollution heatmap - diverse colors from green to red
     const pollutionData = generatePollutionGrid();
     const heatData = pollutionData.features.map(f => [
       f.geometry.coordinates[1], f.geometry.coordinates[0], f.properties.intensity
     ]);
     const pollutionHeatLayer = L.heatLayer(heatData, {
-      radius: 40,
-      blur: 35,
-      maxZoom: 18,
-      max: 0.6,
-      minOpacity: 0.15,
+      radius: 18,
+      blur: 25,
+      maxZoom: 19,
+      max: 0.85,
+      minOpacity: 0.2,
       gradient: {
-        0.0: 'rgba(34, 197, 94, 0)',
-        0.15: 'rgba(34, 197, 94, 0.25)',
-        0.3: 'rgba(132, 204, 22, 0.4)',
-        0.45: 'rgba(234, 179, 8, 0.55)',
-        0.6: 'rgba(249, 115, 22, 0.65)',
-        0.75: 'rgba(239, 68, 68, 0.75)',
-        0.9: 'rgba(185, 28, 28, 0.85)',
-        1.0: 'rgba(153, 27, 27, 0.95)'
+        0.0: 'rgba(34, 197, 94, 0.4)',    // Green - clean areas
+        0.15: 'rgba(34, 197, 94, 0.55)',  // Green
+        0.3: 'rgba(132, 204, 22, 0.6)',   // Light green
+        0.45: 'rgba(234, 179, 8, 0.65)',  // Yellow - moderate
+        0.6: 'rgba(249, 115, 22, 0.7)',   // Orange
+        0.75: 'rgba(239, 68, 68, 0.8)',   // Red - polluted
+        0.9: 'rgba(185, 28, 28, 0.85)',   // Dark red
+        1.0: 'rgba(127, 29, 29, 0.9)'     // Very dark red - hotspots
       }
     });
     pollutionHeatLayer.addTo(map.current);
     layersRef.current.pollution = pollutionHeatLayer;
 
-    // Heat islands - smooth
+    // Heat islands - smooth and unified
     const heatGridData = generateHeatGrid();
     const heatIslandData = heatGridData.features.map(f => [
       f.geometry.coordinates[1], f.geometry.coordinates[0], f.properties.intensity
     ]);
     layersRef.current.heat = L.heatLayer(heatIslandData, {
-      radius: 50,
-      blur: 40,
+      radius: 30,
+      blur: 35,
       maxZoom: 18,
       max: 0.6,
       minOpacity: 0.1,
@@ -133,11 +133,12 @@ export default function Map({ layers, onDataUpdate }) {
 
         console.log(`Loaded ${busRoutes.length} bus routes, ${taxiRoutes.length} taxi routes`);
 
-        // Initialize vehicles with real routes
+        // Initialize vehicles with real routes - much slower, realistic speeds
         const metros = Array(4).fill(null).map((_, i) => ({
           progress: i / 4,
           direction: i % 2 === 0 ? 1 : -1,
-          speed: 0.00015 + Math.random() * 0.00003
+          baseSpeed: 0.000035 + Math.random() * 0.000008, // Much slower base
+          currentSpeed: 0
         }));
 
         const buses = busRoutes.flatMap((route, routeIdx) => {
@@ -145,7 +146,8 @@ export default function Map({ layers, onDataUpdate }) {
             routeIdx,
             progress: (i + Math.random() * 0.3) / 2,
             direction: i % 2 === 0 ? 1 : -1,
-            speed: 0.0001 + Math.random() * 0.00005,
+            baseSpeed: 0.000025 + Math.random() * 0.00001, // Even slower
+            currentSpeed: 0,
             stopTime: 0,
             color: route.color
           }));
@@ -157,7 +159,8 @@ export default function Map({ layers, onDataUpdate }) {
             routeIdx,
             progress: Math.random(),
             direction: Math.random() > 0.5 ? 1 : -1,
-            speed: 0.0002 + Math.random() * 0.0003,
+            baseSpeed: 0.00004 + Math.random() * 0.00003, // Slower
+            currentSpeed: 0,
             state: 'moving',
             stateTimer: 0
           }));
@@ -196,13 +199,25 @@ export default function Map({ layers, onDataUpdate }) {
       return [lng, lat];
     };
 
+    // Smooth easing function for acceleration/deceleration
+    const easeSpeed = (progress, baseSpeed) => {
+      // Slow down near endpoints (0 and 1)
+      const distToEnd = Math.min(progress, 1 - progress);
+      const easeFactor = Math.min(1, distToEnd / 0.08); // Ease within 8% of endpoints
+      return baseSpeed * (0.3 + 0.7 * easeFactor); // Never fully stop, minimum 30% speed
+    };
+
     const animate = () => {
       vehicleMarkersRef.current.forEach(m => m.remove());
       vehicleMarkersRef.current = [];
 
-      // Metros
+      // Metros - smooth movement with easing
       metros.forEach(m => {
-        m.progress += m.speed * m.direction;
+        const targetSpeed = easeSpeed(m.progress, m.baseSpeed);
+        // Smooth interpolation towards target speed
+        m.currentSpeed += (targetSpeed - m.currentSpeed) * 0.05;
+        m.progress += m.currentSpeed * m.direction;
+
         if (m.progress >= 1) { m.progress = 1; m.direction = -1; }
         if (m.progress <= 0) { m.progress = 0; m.direction = 1; }
 
@@ -215,24 +230,29 @@ export default function Map({ layers, onDataUpdate }) {
         );
       });
 
-      // Buses (on real OSRM routes)
+      // Buses - smooth with stops
       buses.forEach(b => {
         const route = busRoutes[b.routeIdx];
         if (!route || !route.route) return;
 
         if (b.stopTime > 0) {
           b.stopTime--;
+          // Gradually slow down when stopping
+          b.currentSpeed *= 0.92;
         } else {
-          b.progress += b.speed * b.direction;
+          const targetSpeed = easeSpeed(b.progress, b.baseSpeed);
+          b.currentSpeed += (targetSpeed - b.currentSpeed) * 0.03; // Slower acceleration
+          b.progress += b.currentSpeed * b.direction;
 
           if (b.progress >= 1 || b.progress <= 0) {
             b.direction *= -1;
             b.progress = Math.max(0, Math.min(1, b.progress));
-            if (Math.random() > 0.3) b.stopTime = 150 + Math.floor(Math.random() * 200);
+            if (Math.random() > 0.3) b.stopTime = 200 + Math.floor(Math.random() * 300);
           }
 
-          if (Math.random() < 0.0005) {
-            b.stopTime = 80 + Math.floor(Math.random() * 100);
+          // Random bus stops (less frequent)
+          if (Math.random() < 0.0003) {
+            b.stopTime = 150 + Math.floor(Math.random() * 150);
           }
         }
 
@@ -244,38 +264,44 @@ export default function Map({ layers, onDataUpdate }) {
         );
       });
 
-      // Taxis (on real OSRM routes)
+      // Taxis - smooth with variable speeds
       taxis.forEach(t => {
         const route = taxiRoutes[t.routeIdx];
         if (!route) return;
 
         if (t.state === 'stopped') {
           t.stateTimer--;
+          t.currentSpeed *= 0.9; // Gradual stop
           if (t.stateTimer <= 0) {
             t.state = 'moving';
             if (Math.random() > 0.5) t.direction *= -1;
           }
         } else if (t.state === 'waiting') {
           t.stateTimer--;
+          t.currentSpeed *= 0.95; // Slow down while waiting
           if (t.stateTimer <= 0) t.state = 'moving';
         } else {
-          t.progress += t.speed * t.direction;
+          const targetSpeed = easeSpeed(t.progress, t.baseSpeed);
+          t.currentSpeed += (targetSpeed - t.currentSpeed) * 0.04;
+          t.progress += t.currentSpeed * t.direction;
 
           if (t.progress >= 1 || t.progress <= 0) {
             // Switch to different route
             t.routeIdx = Math.floor(Math.random() * taxiRoutes.length);
             t.progress = t.progress >= 1 ? 0 : 1;
             t.direction = Math.random() > 0.5 ? 1 : -1;
+            t.currentSpeed = 0; // Reset speed on route change
 
             if (Math.random() > 0.5) {
               t.state = 'stopped';
-              t.stateTimer = 100 + Math.floor(Math.random() * 200);
+              t.stateTimer = 150 + Math.floor(Math.random() * 250);
             }
           }
 
-          if (Math.random() < 0.0008) {
+          // Random traffic stops (less frequent)
+          if (Math.random() < 0.0005) {
             t.state = 'waiting';
-            t.stateTimer = 40 + Math.floor(Math.random() * 80);
+            t.stateTimer = 80 + Math.floor(Math.random() * 120);
           }
         }
 

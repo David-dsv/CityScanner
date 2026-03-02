@@ -147,38 +147,59 @@ function distToSegment(px, py, x1, y1, x2, y2) {
   return Math.sqrt(Math.pow(px - projX, 2) + Math.pow(py - projY, 2));
 }
 
-// Generate pollution heatmap - follows roads
+// Clean zones (parks, residential areas) - will show as GREEN
+const CLEAN_ZONES = [
+  { lng: 2.2720, lat: 48.8415, radius: 0.012, strength: 0.9 },  // Parc Georges Brassens
+  { lng: 2.2680, lat: 48.8340, radius: 0.011, strength: 0.85 }, // Parc André Citroën
+  { lng: 2.2850, lat: 48.8550, radius: 0.008, strength: 0.7 },  // Near Champ de Mars
+  { lng: 2.3050, lat: 48.8340, radius: 0.009, strength: 0.6 },  // Residential south
+  { lng: 2.2750, lat: 48.8500, radius: 0.007, strength: 0.5 },  // Small park
+  { lng: 2.3150, lat: 48.8480, radius: 0.006, strength: 0.55 }, // Quiet residential
+];
+
+// Generate pollution heatmap - with diverse zones (green to red)
 export function generatePollutionGrid() {
   const points = [];
-  const step = 0.0015; // Denser grid
+  const step = 0.00025; // Ultra dense grid (2x denser)
 
   for (let lng = 2.2600; lng <= 2.3240; lng += step) {
     for (let lat = 48.8270; lat <= 48.8590; lat += step) {
-      let intensity = 0.05; // Lower base
+      // Start with moderate base level (yellow-ish)
+      let intensity = 0.25;
 
-      // Add intensity from hotspots (smooth falloff)
+      // REDUCE intensity in clean zones (creates GREEN areas)
+      CLEAN_ZONES.forEach(zone => {
+        const dist = Math.sqrt(Math.pow(lng - zone.lng, 2) + Math.pow(lat - zone.lat, 2));
+        if (dist < zone.radius) {
+          const reduction = zone.strength * Math.pow(1 - dist / zone.radius, 1.8);
+          intensity -= reduction * 0.3;
+        }
+      });
+
+      // INCREASE intensity near hotspots (creates RED areas)
       POLLUTION_HOTSPOTS.forEach(h => {
         const dist = Math.sqrt(Math.pow(lng - h.lng, 2) + Math.pow(lat - h.lat, 2));
-        if (dist < 0.02) {
-          intensity += h.intensity * 0.6 * Math.pow(1 - dist / 0.02, 2);
+        if (dist < 0.012) {
+          intensity += h.intensity * 0.55 * Math.pow(1 - dist / 0.012, 2);
         }
       });
 
-      // Add intensity from road corridors
+      // INCREASE intensity along road corridors (orange/red along roads)
       ROAD_CORRIDORS.forEach(road => {
         const dist = distToSegment(lng, lat, road.start[0], road.start[1], road.end[0], road.end[1]);
-        if (dist < road.width) {
-          intensity += road.intensity * 0.4 * Math.pow(1 - dist / road.width, 1.5);
+        if (dist < road.width * 0.8) {
+          intensity += road.intensity * 0.35 * Math.pow(1 - dist / (road.width * 0.8), 1.5);
         }
       });
 
-      if (intensity > 0.08) {
-        points.push({
-          type: 'Feature',
-          properties: { intensity: Math.min(1, intensity) },
-          geometry: { type: 'Point', coordinates: [lng, lat] }
-        });
-      }
+      // Clamp between 0.05 and 1
+      intensity = Math.max(0.05, Math.min(1, intensity));
+
+      points.push({
+        type: 'Feature',
+        properties: { intensity },
+        geometry: { type: 'Point', coordinates: [lng, lat] }
+      });
     }
   }
   return { type: 'FeatureCollection', features: points };
@@ -187,26 +208,34 @@ export function generatePollutionGrid() {
 // Generate heat grid - concentrated in built areas
 export function generateHeatGrid() {
   const points = [];
-  const step = 0.002;
+  const step = 0.0004; // Ultra dense
 
   for (let lng = 2.2600; lng <= 2.3240; lng += step) {
     for (let lat = 48.8270; lat <= 48.8590; lat += step) {
-      let intensity = 0.03;
+      let intensity = 0.15; // Base urban heat
 
-      HEAT_ISLANDS.forEach(h => {
-        const dist = Math.sqrt(Math.pow(lng - h.lng, 2) + Math.pow(lat - h.lat, 2));
-        if (dist < 0.018) {
-          intensity += h.intensity * 0.7 * Math.pow(1 - dist / 0.018, 2);
+      // Reduce in park areas (cooler)
+      CLEAN_ZONES.forEach(zone => {
+        const dist = Math.sqrt(Math.pow(lng - zone.lng, 2) + Math.pow(lat - zone.lat, 2));
+        if (dist < zone.radius * 0.8) {
+          intensity -= zone.strength * 0.2 * Math.pow(1 - dist / (zone.radius * 0.8), 1.5);
         }
       });
 
-      if (intensity > 0.08) {
-        points.push({
-          type: 'Feature',
-          properties: { intensity: Math.min(1, intensity) },
-          geometry: { type: 'Point', coordinates: [lng, lat] }
-        });
-      }
+      // Increase in heat islands
+      HEAT_ISLANDS.forEach(h => {
+        const dist = Math.sqrt(Math.pow(lng - h.lng, 2) + Math.pow(lat - h.lat, 2));
+        if (dist < 0.018) {
+          intensity += h.intensity * 0.6 * Math.pow(1 - dist / 0.018, 1.8);
+        }
+      });
+
+      intensity = Math.max(0.05, Math.min(1, intensity));
+      points.push({
+        type: 'Feature',
+        properties: { intensity },
+        geometry: { type: 'Point', coordinates: [lng, lat] }
+      });
     }
   }
   return { type: 'FeatureCollection', features: points };
