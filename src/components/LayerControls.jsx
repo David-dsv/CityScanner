@@ -1,4 +1,4 @@
-import { Wind, Thermometer, Route, Layers, ChevronDown, ChevronUp } from 'lucide-react';
+import { Wind, Thermometer, Layers, ChevronDown, ChevronUp } from 'lucide-react';
 import { useState } from 'react';
 
 export default function LayerControls({ layers, onToggle }) {
@@ -6,8 +6,7 @@ export default function LayerControls({ layers, onToggle }) {
 
   const layerConfig = [
     { id: 'pollution', name: 'Pollution', desc: 'PM2.5 & NO₂', icon: Wind, color: '#22c55e' },
-    { id: 'heat', name: 'Îlots de chaleur', desc: 'Température', icon: Thermometer, color: '#f97316' },
-    { id: 'roads', name: 'Qualité routes', desc: 'État chaussées', icon: Route, color: '#3b82f6' }
+    { id: 'heat', name: 'Îlots de chaleur', desc: 'Température', icon: Thermometer, color: '#f97316' }
   ];
 
   return (

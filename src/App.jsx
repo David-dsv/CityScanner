@@ -7,8 +7,7 @@ import './index.css';
 function App() {
   const [layers, setLayers] = useState({
     pollution: false,
-    heat: false,
-    roads: false
+    heat: false
   });
 
   const [data, setData] = useState({
