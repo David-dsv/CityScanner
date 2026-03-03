@@ -16,8 +16,10 @@ export default function Map({ layers, onDataUpdate }) {
   const mapContainer = useRef(null);
   const map = useRef(null);
   const animationRef = useRef(null);
+  const frameCounterRef = useRef(0);
   const layersRef = useRef({});
   const vehicleMarkersRef = useRef([]);
+  const routeLinesRef = useRef([]); // Store route polylines
   const routesRef = useRef({ buses: [], taxis: [] });
   const vehiclesRef = useRef(null);
   const [mapLoaded, setMapLoaded] = useState(false);
@@ -137,8 +139,9 @@ export default function Map({ layers, onDataUpdate }) {
         const metros = Array(4).fill(null).map((_, i) => ({
           progress: i / 4,
           direction: i % 2 === 0 ? 1 : -1,
-          baseSpeed: 0.000035 + Math.random() * 0.000008, // Much slower base
-          currentSpeed: 0
+          baseSpeed: 0.000035 + Math.random() * 0.000008,
+          currentSpeed: 0,
+          trail: [] // Trail for metros
         }));
 
         const buses = busRoutes.flatMap((route, routeIdx) => {
@@ -146,10 +149,11 @@ export default function Map({ layers, onDataUpdate }) {
             routeIdx,
             progress: (i + Math.random() * 0.3) / 2,
             direction: i % 2 === 0 ? 1 : -1,
-            baseSpeed: 0.000025 + Math.random() * 0.00001, // Even slower
+            baseSpeed: 0.000025 + Math.random() * 0.00001,
             currentSpeed: 0,
             stopTime: 0,
-            color: route.color
+            color: route.color,
+            trail: [] // Store last positions for trail effect
           }));
         });
 
@@ -159,14 +163,48 @@ export default function Map({ layers, onDataUpdate }) {
             routeIdx,
             progress: Math.random(),
             direction: Math.random() > 0.5 ? 1 : -1,
-            baseSpeed: 0.00004 + Math.random() * 0.00003, // Slower
+            baseSpeed: 0.00004 + Math.random() * 0.00003,
             currentSpeed: 0,
             state: 'moving',
-            stateTimer: 0
+            stateTimer: 0,
+            trail: [] // Store last positions for trail effect
           }));
         });
 
         vehiclesRef.current = { metros, buses, taxis };
+
+        // Draw full route as blue dots for buses
+        busRoutes.forEach(route => {
+          if (route.route && route.route.length > 1) {
+            // Draw every point
+            route.route.forEach((coord) => {
+              const dot = L.circleMarker([coord[1], coord[0]], {
+                radius: 2,
+                fillColor: '#3b82f6',
+                color: 'transparent',
+                fillOpacity: 0.6
+              }).addTo(map.current);
+              routeLinesRef.current.push(dot);
+            });
+          }
+        });
+
+        // Draw full route as blue dots for taxis
+        taxiRoutes.forEach(route => {
+          if (route && route.length > 1) {
+            // Draw every point
+            route.forEach((coord) => {
+              const dot = L.circleMarker([coord[1], coord[0]], {
+                radius: 1.5,
+                fillColor: '#3b82f6',
+                color: 'transparent',
+                fillOpacity: 0.5
+              }).addTo(map.current);
+              routeLinesRef.current.push(dot);
+            });
+          }
+        });
+
         setRoutesLoaded(true);
 
       } catch (e) {
@@ -211,10 +249,18 @@ export default function Map({ layers, onDataUpdate }) {
       vehicleMarkersRef.current.forEach(m => m.remove());
       vehicleMarkersRef.current = [];
 
-      // Metros - smooth movement with easing
+      // Trail colors: white → pink → violet (gradient)
+      const trailColors = ['#f0abfc', '#e879f9', '#d946ef', '#c026d3', '#a21caf', '#7c3aed', '#6d28d9', '#5b21b6', '#4c1d95'];
+      // Different trail lengths per vehicle type
+      const metroTrailLength = 1600;
+      const busTrailLength = 1100;
+      const taxiTrailLength = 600;
+      frameCounterRef.current += 1;
+      const frameCounter = frameCounterRef.current;
+
+      // Metros - smooth movement with easing and trail
       metros.forEach(m => {
         const targetSpeed = easeSpeed(m.progress, m.baseSpeed);
-        // Smooth interpolation towards target speed
         m.currentSpeed += (targetSpeed - m.currentSpeed) * 0.05;
         m.progress += m.currentSpeed * m.direction;
 
@@ -224,24 +270,45 @@ export default function Map({ layers, onDataUpdate }) {
         const coords = METRO_LINE_6_ROUTE.geometry.coordinates;
         const [lng, lat] = getPositionOnRoute(coords, m.progress);
 
+        // Update metro trail
+        m.trail.unshift([lat, lng]);
+        if (m.trail.length > metroTrailLength) m.trail.pop();
+
+        // Render metro trail (every 8th point)
+        m.trail.forEach((pos, idx) => {
+          if (idx > 0 && idx % 8 === 0) {
+            const colorIdx = Math.min(Math.floor(idx / 180), trailColors.length - 1);
+            const size = 6 - (idx / metroTrailLength) * 5;
+            const opacity = 0.85 - (idx / metroTrailLength) * 0.8;
+            vehicleMarkersRef.current.push(
+              L.circleMarker(pos, {
+                radius: Math.max(1, size),
+                fillColor: trailColors[colorIdx],
+                color: 'transparent',
+                fillOpacity: Math.max(0.05, opacity)
+              }).addTo(map.current)
+            );
+          }
+        });
+
+        // Main metro marker
         vehicleMarkersRef.current.push(
           L.circleMarker([lat, lng], { radius: 14, fillColor: '#22c55e', color: 'transparent', fillOpacity: 0.35 }).addTo(map.current),
           L.circleMarker([lat, lng], { radius: 9, fillColor: '#22c55e', color: '#fff', weight: 2, fillOpacity: 1 }).addTo(map.current)
         );
       });
 
-      // Buses - smooth with stops
+      // Buses - smooth with stops and trail
       buses.forEach(b => {
         const route = busRoutes[b.routeIdx];
         if (!route || !route.route) return;
 
         if (b.stopTime > 0) {
           b.stopTime--;
-          // Gradually slow down when stopping
           b.currentSpeed *= 0.92;
         } else {
           const targetSpeed = easeSpeed(b.progress, b.baseSpeed);
-          b.currentSpeed += (targetSpeed - b.currentSpeed) * 0.03; // Slower acceleration
+          b.currentSpeed += (targetSpeed - b.currentSpeed) * 0.03;
           b.progress += b.currentSpeed * b.direction;
 
           if (b.progress >= 1 || b.progress <= 0) {
@@ -250,7 +317,6 @@ export default function Map({ layers, onDataUpdate }) {
             if (Math.random() > 0.3) b.stopTime = 200 + Math.floor(Math.random() * 300);
           }
 
-          // Random bus stops (less frequent)
           if (Math.random() < 0.0003) {
             b.stopTime = 150 + Math.floor(Math.random() * 150);
           }
@@ -258,27 +324,49 @@ export default function Map({ layers, onDataUpdate }) {
 
         const [lng, lat] = getPositionOnRoute(route.route, b.progress);
 
+        // Update trail every frame for smooth long trail
+        b.trail.unshift([lat, lng]);
+        if (b.trail.length > busTrailLength) b.trail.pop();
+
+        // Render trail with gradient (every 6th point to reduce markers)
+        b.trail.forEach((pos, idx) => {
+          if (idx > 0 && idx % 6 === 0) {
+            const colorIdx = Math.min(Math.floor(idx / 120), trailColors.length - 1);
+            const size = 5 - (idx / busTrailLength) * 4;
+            const opacity = 0.8 - (idx / busTrailLength) * 0.75;
+            vehicleMarkersRef.current.push(
+              L.circleMarker(pos, {
+                radius: Math.max(1, size),
+                fillColor: trailColors[colorIdx],
+                color: 'transparent',
+                fillOpacity: Math.max(0.05, opacity)
+              }).addTo(map.current)
+            );
+          }
+        });
+
+        // Main bus marker
         vehicleMarkersRef.current.push(
           L.circleMarker([lat, lng], { radius: 11, fillColor: '#f97316', color: 'transparent', fillOpacity: 0.35 }).addTo(map.current),
           L.circleMarker([lat, lng], { radius: 7, fillColor: '#f97316', color: '#fff', weight: 2, fillOpacity: 1 }).addTo(map.current)
         );
       });
 
-      // Taxis - smooth with variable speeds
+      // Taxis - smooth with variable speeds and trail
       taxis.forEach(t => {
         const route = taxiRoutes[t.routeIdx];
         if (!route) return;
 
         if (t.state === 'stopped') {
           t.stateTimer--;
-          t.currentSpeed *= 0.9; // Gradual stop
+          t.currentSpeed *= 0.9;
           if (t.stateTimer <= 0) {
             t.state = 'moving';
             if (Math.random() > 0.5) t.direction *= -1;
           }
         } else if (t.state === 'waiting') {
           t.stateTimer--;
-          t.currentSpeed *= 0.95; // Slow down while waiting
+          t.currentSpeed *= 0.95;
           if (t.stateTimer <= 0) t.state = 'moving';
         } else {
           const targetSpeed = easeSpeed(t.progress, t.baseSpeed);
@@ -286,11 +374,11 @@ export default function Map({ layers, onDataUpdate }) {
           t.progress += t.currentSpeed * t.direction;
 
           if (t.progress >= 1 || t.progress <= 0) {
-            // Switch to different route
             t.routeIdx = Math.floor(Math.random() * taxiRoutes.length);
             t.progress = t.progress >= 1 ? 0 : 1;
             t.direction = Math.random() > 0.5 ? 1 : -1;
-            t.currentSpeed = 0; // Reset speed on route change
+            t.currentSpeed = 0;
+            t.trail = []; // Clear trail on route change
 
             if (Math.random() > 0.5) {
               t.state = 'stopped';
@@ -298,7 +386,6 @@ export default function Map({ layers, onDataUpdate }) {
             }
           }
 
-          // Random traffic stops (less frequent)
           if (Math.random() < 0.0005) {
             t.state = 'waiting';
             t.stateTimer = 80 + Math.floor(Math.random() * 120);
@@ -310,6 +397,28 @@ export default function Map({ layers, onDataUpdate }) {
 
         const [lng, lat] = getPositionOnRoute(currentRoute, Math.max(0, Math.min(1, t.progress)));
 
+        // Update trail every frame for smooth long trail
+        t.trail.unshift([lat, lng]);
+        if (t.trail.length > taxiTrailLength) t.trail.pop();
+
+        // Render trail with gradient (every 5th point)
+        t.trail.forEach((pos, idx) => {
+          if (idx > 0 && idx % 5 === 0) {
+            const colorIdx = Math.min(Math.floor(idx / 70), trailColors.length - 1);
+            const size = 4 - (idx / taxiTrailLength) * 3;
+            const opacity = 0.75 - (idx / taxiTrailLength) * 0.7;
+            vehicleMarkersRef.current.push(
+              L.circleMarker(pos, {
+                radius: Math.max(1, size),
+                fillColor: trailColors[colorIdx],
+                color: 'transparent',
+                fillOpacity: Math.max(0.05, opacity)
+              }).addTo(map.current)
+            );
+          }
+        });
+
+        // Main taxi marker
         vehicleMarkersRef.current.push(
           L.circleMarker([lat, lng], { radius: 9, fillColor: '#eab308', color: 'transparent', fillOpacity: 0.4 }).addTo(map.current),
           L.circleMarker([lat, lng], { radius: 5, fillColor: '#eab308', color: '#fff', weight: 1.5, fillOpacity: 1 }).addTo(map.current)
