@@ -7,7 +7,8 @@ import './index.css';
 function App() {
   const [layers, setLayers] = useState({
     pollution: false,
-    heat: false
+    heat: false,
+    roads: false
   });
 
   const [data, setData] = useState({
@@ -37,12 +38,12 @@ function App() {
       <div className="bottom-bar">
         <div className="live">
           <span className="live-dot"></span>
-          <span>Simulation en direct</span>
+          <span>Live Simulation</span>
         </div>
         <div className="separator"></div>
-        <span>Zone: <span className="highlight">15ème Arrondissement</span></span>
+        <span>Zone: <span className="highlight">15th Arrondissement</span></span>
         <div className="separator"></div>
-        <span>Capteurs: <span className="highlight">{data.vehicleCount}</span></span>
+        <span>Sensors: <span className="highlight">{data.vehicleCount}</span></span>
       </div>
 
       <div className="mit-badge">

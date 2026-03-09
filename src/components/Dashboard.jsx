@@ -10,10 +10,10 @@ export default function Dashboard({ data, layers }) {
   }, []);
 
   const getPm25Status = (value) => {
-    if (value <= 25) return { label: 'Bon', color: '#22c55e' };
-    if (value <= 50) return { label: 'Modéré', color: '#eab308' };
-    if (value <= 75) return { label: 'Médiocre', color: '#f97316' };
-    return { label: 'Mauvais', color: '#ef4444' };
+    if (value <= 25) return { label: 'Good', color: '#22c55e' };
+    if (value <= 50) return { label: 'Moderate', color: '#eab308' };
+    if (value <= 75) return { label: 'Fair', color: '#f97316' };
+    return { label: 'Poor', color: '#ef4444' };
   };
 
   const pm25Status = getPm25Status(data?.avgPm25 || 0);
@@ -24,11 +24,11 @@ export default function Dashboard({ data, layers }) {
       <div className="dashboard-header">
         <div>
           <h1>City Scanner</h1>
-          <p className="subtitle">Paris 15ème - Demo</p>
+          <p className="subtitle">Paris 15th - Demo</p>
         </div>
         <div className="time">
-          <p className="time-value">{time.toLocaleTimeString('fr-FR')}</p>
-          <p className="time-date">{time.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' })}</p>
+          <p className="time-value">{time.toLocaleTimeString('en-US')}</p>
+          <p className="time-date">{time.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short' })}</p>
         </div>
       </div>
 
@@ -38,7 +38,7 @@ export default function Dashboard({ data, layers }) {
         <div className="card">
           <div className="card-header">
             <Wind size={18} color="#888" />
-            <span>Qualité de l'air</span>
+            <span>Air Quality</span>
             <span className="status-badge" style={{ color: pm25Status.color }}>
               {pm25Status.label}
             </span>
@@ -58,13 +58,13 @@ export default function Dashboard({ data, layers }) {
         {/* Vehicles */}
         <div className="card">
           <div className="card-header">
-            <span>Capteurs mobiles actifs</span>
+            <span>Active Mobile Sensors</span>
           </div>
           <div className="vehicles">
             <div className="vehicle">
               <Train size={16} color="#22c55e" />
               <span className="vehicle-count">{data?.metroCount || 0}</span>
-              <span className="vehicle-label">Métro</span>
+              <span className="vehicle-label">Metro</span>
             </div>
             <div className="vehicle">
               <Bus size={16} color="#f97316" />
@@ -83,7 +83,7 @@ export default function Dashboard({ data, layers }) {
         <div className="card">
           <div className="card-header">
             <MapPin size={18} color="#888" />
-            <span>Points de données</span>
+            <span>Data Points</span>
             <span className="data-count">
               {((data?.dataPoints || 0) * 1.6).toLocaleString()}
             </span>
@@ -92,10 +92,10 @@ export default function Dashboard({ data, layers }) {
 
         {/* Comparison */}
         <div className="card comparison">
-          <p className="comparison-title">Comparaison Airparif</p>
+          <p className="comparison-title">Airparif Comparison</p>
           <div className="comparison-row">
             <div>
-              <span className="comparison-label">Stations fixes</span>
+              <span className="comparison-label">Fixed Stations</span>
               <span className="comparison-value">2</span>
             </div>
             <div className="comparison-arrow">
@@ -111,11 +111,11 @@ export default function Dashboard({ data, layers }) {
 
         {/* Active Layers */}
         <div className="card">
-          <p className="layers-title">Couches actives</p>
+          <p className="layers-title">Active Layers</p>
           <div className="layers-list">
             {layers.pollution && <span className="layer-tag green">Pollution</span>}
-            {layers.heat && <span className="layer-tag orange">Îlots chaleur</span>}
-            {layers.roads && <span className="layer-tag blue">Routes</span>}
+            {layers.heat && <span className="layer-tag orange">Heat Islands</span>}
+            {layers.roads && <span className="layer-tag blue">Roads</span>}
           </div>
         </div>
       </div>

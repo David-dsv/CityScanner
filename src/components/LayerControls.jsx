@@ -1,4 +1,4 @@
-import { Wind, Thermometer, Layers, ChevronDown, ChevronUp } from 'lucide-react';
+import { Wind, Thermometer, Layers, ChevronDown, ChevronUp, Route } from 'lucide-react';
 import { useState } from 'react';
 
 export default function LayerControls({ layers, onToggle }) {
@@ -6,14 +6,15 @@ export default function LayerControls({ layers, onToggle }) {
 
   const layerConfig = [
     { id: 'pollution', name: 'Pollution', desc: 'PM2.5 & NO₂', icon: Wind, color: '#22c55e' },
-    { id: 'heat', name: 'Îlots de chaleur', desc: 'Température', icon: Thermometer, color: '#f97316' }
+    { id: 'heat', name: 'Heat Islands', desc: 'Temperature', icon: Thermometer, color: '#f97316' },
+    { id: 'roads', name: 'Road Quality', desc: 'Surface condition', icon: Route, color: '#3b82f6' }
   ];
 
   return (
     <div className="layer-controls">
       <button className="layer-header" onClick={() => setIsExpanded(!isExpanded)}>
         <Layers size={16} />
-        <span>Couches de données</span>
+        <span>Data Layers</span>
         {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
       </button>
 
@@ -41,17 +42,17 @@ export default function LayerControls({ layers, onToggle }) {
           })}
 
           <div className="legend">
-            <p className="legend-title">Légende véhicules</p>
-            <div className="legend-item"><span className="dot" style={{ background: '#22c55e' }} />Métro Ligne 6</div>
+            <p className="legend-title">Vehicle Legend</p>
+            <div className="legend-item"><span className="dot" style={{ background: '#22c55e' }} />Metro Line 6</div>
             <div className="legend-item"><span className="dot" style={{ background: '#f97316' }} />Bus</div>
             <div className="legend-item"><span className="dot" style={{ background: '#eab308' }} />Taxis</div>
           </div>
 
           {layers.pollution && (
             <div className="scale">
-              <p className="scale-title">Échelle pollution</p>
+              <p className="scale-title">Pollution Scale</p>
               <div className="scale-bar pollution" />
-              <div className="scale-labels"><span>Faible</span><span>Élevé</span></div>
+              <div className="scale-labels"><span>Low</span><span>High</span></div>
             </div>
           )}
         </div>
